@@ -1,0 +1,11 @@
+{
+  "name": "client",
+  "version": "0.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "coffee client.coffee"
+  },
+  "author": "Stéphane Alnet <stephane@shimaore.net> (http://shimaore.net/)",
+  "license": "ISC"
+}
