@@ -21,10 +21,20 @@ fs.open device, flags, (err,fd) ->
   output.on 'error', (error) ->
     console.log 'Output stream error: ' + error
 
-  setTimeout ->
+  setInterval ->
     output.write 'v32000\r\n'
     console.log 'Sent'
-  , 1000
+  , 1341
+
+  setInterval ->
+    output.write 'v64000\r\n'
+    console.log 'Sent'
+  , 697
+
+  setInterval ->
+    output.write 'v0\r\n'
+    console.log 'Sent'
+  , 2312
 
   setInterval ->
     output.write 'OK\n'
