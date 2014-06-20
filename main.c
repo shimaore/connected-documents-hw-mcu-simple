@@ -197,8 +197,12 @@ int main() {
 
   // Send configuration out.
   send_len = 15;
+  send_len = 3;
   send_p = 0;
   send[0] = 'T';
+  send[1] = '\r';
+  send[2] = '\n';
+#if 0
   send[1] = '+';
   send[2] = 'N';
   send[3] = 'A';
@@ -213,6 +217,7 @@ int main() {
   send[12] = 'i';
   send[13] = '\r';
   send[14] = '\n';
+#endif
   UDR = 'A';
 
   while(1) {
@@ -221,14 +226,10 @@ int main() {
 
     if(send_len) {
       if(send_p < send_len) {
-        DDRB = 0xff;
-        PORTB = send_p;
         byte c = send[send_p];
         send_p++;
-        _delay_ms(30);
         loop_until_bit_is_set(UCSRA,UDRE);
-        // UDR = c;
-        UDR = send_p;
+        UDR = c;
       } else {
         // String was fully sent.
         send_len = 0;
