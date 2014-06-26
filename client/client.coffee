@@ -3,6 +3,9 @@ fs = require 'fs'
 device = '/dev/rfcomm0'
 flags = 'w+'
 
+zappa = require 'zappajs'
+
+console.log "Opening #{device} with flags #{flags}"
 fs.open device, flags, (err,fd) ->
   if err then throw err
 
@@ -14,29 +17,20 @@ fs.open device, flags, (err,fd) ->
 
   input.on 'end', ->
     console.log 'Input stream END'
+    throw 'Done'
 
   input.on 'error', (error) ->
-    console.log 'Input stream error: ' + error
+    console.error 'Input stream'
+    throw error
 
   output.on 'error', (error) ->
-    console.log 'Output stream error: ' + error
+    console.error 'Output stream'
+    throw error
 
-  setInterval ->
-    output.write 'v32000\r\n'
-    console.log 'Sent'
-  , 1341
+  output.write '\r\n!s\r\n'
 
-  setInterval ->
-    output.write 'v64000\r\n'
-    console.log 'Sent'
-  , 697
+  s = zappa ->
 
-  setInterval ->
-    output.write 'v0\r\n'
-    console.log 'Sent'
-  , 2312
-
-  setInterval ->
-    output.write 'OK\n'
-    console.log 'OK Sent'
-  , 2000
+    @put '/value/:value', ->
+      output.write "\r\n!v#{@params.value}\r\n"
+      @json ok:true

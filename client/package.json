@@ -7,5 +7,8 @@
     "start": "coffee client.coffee"
   },
   "author": "Stéphane Alnet <stephane@shimaore.net> (http://shimaore.net/)",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "zappajs": "^0.4.22"
+  }
 }
