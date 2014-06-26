@@ -240,17 +240,28 @@ int main() {
                 case 'v':
                   {
                     pos = 2;
-                    word value = to_int();
+                    word limit = to_int();
+                    pos++; // skip ','
+                    word top = to_int();
                     // Set a 50% duty cycle for testing.
-                    send[1] = hex(value >> 12);
-                    send[2] = hex(value >>  8);
-                    send[3] = hex(value >>  4);
-                    send[4] = hex(value >>  0);
-                    pwm_change(value>>1,value);
-                    send_len = 6;
+                    send_len = 11;
                     send_p = 0;
-                    send[0] = 'V';
-                    send[5] = '\n';
+                    if(limit <= top) {
+                      pwm_change(limit,top);
+                      send[0] = 'V';
+                    } else {
+                      send[0] = 'N';
+                    }
+                    send[1] = hex(limit >> 12);
+                    send[2] = hex(limit >>  8);
+                    send[3] = hex(limit >>  4);
+                    send[4] = hex(limit >>  0);
+                    send[5] = ',';
+                    send[6] = hex(top >> 12);
+                    send[7] = hex(top >>  8);
+                    send[8] = hex(top >>  4);
+                    send[9] = hex(top >>  0);
+                    send[10] = '\n';
                     UDR = '!';
                   }
                   break;

@@ -31,6 +31,6 @@ fs.open device, flags, (err,fd) ->
 
   s = zappa ->
 
-    @put '/value/:value', ->
-      output.write "\r\n!v#{@params.value}\r\n"
+    @put '/value/:limit/:top', ->
+      output.write "\r\n!v#{@params.limit},#{@params.top}\r\n"
       @json ok:true
