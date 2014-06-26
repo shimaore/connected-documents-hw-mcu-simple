@@ -80,7 +80,7 @@ inline void usart_init() {
 
 /* USART RxD */
 
-enum { received_max = 8 };
+enum { received_max = 16 };
 volatile uint8_t received[received_max];
 volatile uint8_t received_p;
 
@@ -114,34 +114,28 @@ ISR( USART0_TX_vect, ISR_BLOCK ) {
 
 /*
  * "If the base PWM frequency is actively changed, using the OCR1A as TOP is clearly a better choice."
- * Mode: Fast PWM; OC1A is not connected (used as top) therefor COM1A1=0, COM1A0=0; OC1B is used as PWM output (with output cleared at Compare Match and set at top, therefor COM1B1=1, COM1B0=0); WGM13=1; WGM(12,11,10)=1
  *
- * Also TOV1 must be set so that the interrupt is called to update the new OCR1A and OCR1B at each cycle.
+ * OC1B is used as output; TCNT1 will count from 0 (BOTTOM) to OCR1A (TOP), the output will be set on OC1B while OCR1B isn't reached (charge interval), and cleared above that value (discharge interval); this is Compare Output Mode 2 in Fast PWM mode (Table 12-3). ICR is not used. We're using Fast PWM Mode (Section 12.8.3) in mode 15 (Fast PWM, OCR1A is TOP, Update on TOP + TOV1 set on TOP).
+ *
+ * (Also TOV1 must be set so that the interrupt is called to update the new OCR1A and OCR1B at each cycle.)
  *
  * See also App Note http://www.atmel.com/Images/doc2542.pdf for filtering (R in series, C between output of R and ground, R=10k, C=100nF for crossover frequency of 1kHz (low-pass filter)).
  */
 
-
-
 inline void pwm_init() {
-  TCCR1A = _BV(COM1B1) | _BV(WGM10) | _BV(WGM11);
-  TCCR1B = _BV(WGM12) | _BV(WGM13);
-  TIFR |= _BV(TOV1);
-  TIMSK |= _BV(TOIE1);
-  // Set OC1B as output.
-  OC1B_DDR |= _BV(OC1B_BIT);
+  TCCR1A = _BV(COM1B1) /* Clear OC1B on compare match, set at TOP; PWM mode 2 = non-inverted */ | _BV(WGM10) | _BV(WGM11) /* PWM Mode 15 */ ;
+  TCCR1B = _BV(WGM12) | _BV(WGM13) /* PWM Mode 15 */ | _BV(CS10) /* Clock = clk_I/O with no prescaling */ ;
 }
 
-inline void pwm_change( word frequency ) {
-  /* The loop description starts with the base frequency of the loop. */
-  OCR1A = frequency;
-
-  /* OCR1B is never modified if the loop_length is zero */
-  OCR1B = 0;
-}
-
-ISR( TIMER1_OVF_vect, ISR_BLOCK ) {
-  // OCR1B = read_word(loop_pos);
+inline void pwm_change( word limit, word top ) {
+  // Set OC1A as output iff top is not zero.
+  if(top) {
+    OC1B_DDR |= _BV(OC1B_BIT);
+  } else {
+    OC1B_DDR &= ~ _BV(OC1B_BIT);
+  }
+  OCR1B = limit;
+  OCR1A = top;
 }
 
 /* Examples of scenarios to test:
@@ -153,7 +147,7 @@ ISR( TIMER1_OVF_vect, ISR_BLOCK ) {
  * - base frequency with length > pwm_buffer_size (>2 blocks)
  */
 
-byte pos = 0;
+volatile byte pos;
 
 inline word mul10( word a ) {
   word a2;
@@ -161,6 +155,15 @@ inline word mul10( word a ) {
   a2 = a;
   a <<= 2;
   return a+a2;
+}
+
+char hex( uint8_t c ) {
+  c &= 0x0f;
+  if(c<10) {
+    return c+'0';
+  } else {
+    return c-10+'A';
+  }
 }
 
 word to_int() {
@@ -175,6 +178,13 @@ word to_int() {
 #include "util/delay.h"
 
 int main() {
+  enum {
+    wait_for_module,
+    show_name,
+    wait_for_connection,
+    connected
+  } next_step;
+
   toggle_led1();
   cli();
   // Ensure the prescaler is disabled.
@@ -186,44 +196,21 @@ int main() {
   received_parse = false;
   send_p = 0;
   send_len = 0;
+  pos = 0;
 
   usart_init();
   pwm_init();
   set_sleep_mode(SLEEP_MODE_IDLE);
   sei();
 
-  // Wait for the module to be ready.
-  _delay_ms(2000);
-
-  // Send configuration out.
-  send_len = 15;
-  send_len = 3;
-  send_p = 0;
-  send[0] = 'T';
-  send[1] = '\r';
-  send[2] = '\n';
-#if 0
-  send[1] = '+';
-  send[2] = 'N';
-  send[3] = 'A';
-  send[4] = 'M';
-  send[5] = 'E';
-  send[6] = '=';
-  send[7] = 'F';
-  send[8] = 'r';
-  send[9] = 'i';
-  send[10] = 'f';
-  send[11] = 'r';
-  send[12] = 'i';
-  send[13] = '\r';
-  send[14] = '\n';
-#endif
-  UDR = 'A';
+  // Start sending data out.
+  next_step = wait_for_module;
 
   while(1) {
     /* Wait for transmit-complete or receive */
     sleep_mode();
 
+    /* Handle transmissions first */
     if(send_len) {
       if(send_p < send_len) {
         byte c = send[send_p];
@@ -236,35 +223,145 @@ int main() {
         send_p = 0;
       }
     }
+
+    /* Handle reception of data from bluetooth */
     if(!send_len) {
       if(received_parse) {
-        word p1;
-        pos = 1;
         switch(received[0]) {
-          case 'v':
-            p1 = to_int();
-            pwm_change(p1);
-            send_len = 3;
-            send_p = 0;
-            send[0] = 'K';
-            send[1] = '\r';
-            send[2] = '\n';
-            UDR = 'O';
+          case '!': {
+              switch(received[1]) {
+                case 'p':
+                  send_len = 2;
+                  send_p = 0;
+                  send[0] = 'P';
+                  send[1] = '\n';
+                  UDR = '!';
+                  break;
+                case 'v':
+                  {
+                    pos = 2;
+                    word value = to_int();
+                    // Set a 50% duty cycle for testing.
+                    send[1] = hex(value >> 12);
+                    send[2] = hex(value >>  8);
+                    send[3] = hex(value >>  4);
+                    send[4] = hex(value >>  0);
+                    pwm_change(value>>1,value);
+                    send_len = 6;
+                    send_p = 0;
+                    send[0] = 'V';
+                    send[5] = '\n';
+                    UDR = '!';
+                  }
+                  break;
+                case 's':
+                  pwm_change(0,0);
+                  send_len = 2;
+                  send_p = 0;
+                  send[0] = 'S';
+                  send[1] = '\n';
+                  UDR = '!';
+                  break;
+              }
+            }
+            break;
+          case '+':
+            // +READY
+            if(received[1] == 'R' && received_p == 6) {
+              next_step = show_name;
+              send_len = 5;
+              send_p = 0;
+              send[0] = '\n';
+              send[1] = 'A';
+              send[2] = 'T';
+              send[3] = '\r';
+              send[4] = '\n';
+              UDR = '\r';
+            }
+            // +PAIRABLE
+            // +NAME=
+            if(received[1] == 'N' && received[5] == '=') {
+              if(received[6] != 'F') {
+                send_len = 14;
+                send_p = 0;
+                send[0] = 'T';
+                send[1] = '+';
+                send[2] = 'N';
+                send[3] = 'A';
+                send[4] = 'M';
+                send[5] = 'E';
+                send[6] = 'F';
+                send[7] = 'r';
+                send[8] = 'i';
+                send[9] = 'f';
+                send[10] = 'r';
+                send[11] = 'i';
+                send[12] = '\r';
+                send[13] = '\n';
+                UDR = 'A';
+              } else {
+                send_len = 7;
+                send_p = 0;
+                send[0] = 'T';
+                send[1] = '+';
+                send[2] = 'P';
+                send[3] = 'I';
+                send[4] = 'N';
+                send[5] = '\r';
+                send[6] = '\n';
+                UDR = 'A';
+              }
+            }
+            // +PIN=
+            if(received[1] == 'P' && received[4] == '=') {
+              if(received[5] != '6') {
+                send_len = 11;
+                send_p = 0;
+                send[0] = 'T';
+                send[1] = '+';
+                send[2] = 'P';
+                send[3] = 'I';
+                send[4] = 'N';
+                send[5] = '6';
+                send[6] = '9';
+                send[7] = '6';
+                send[8] = '9';
+                send[9] = '\r';
+                send[10] = '\n';
+                UDR = 'A';
+              } else {
+                next_step = wait_for_connection;
+              }
+            }
+            // +CONNECTING<<00:1B:DC:0F:E3:69
+            // +CONNECTED
+            if(received[1] == 'R' && received_p == 10) {
+              next_step = connected;
+            }
             break;
           case 'O':
             if(received[1] == 'K') {
               toggle_led1();
-              send_len = 4;
-              send_p = 0;
-              send[0] = 'e';
-              send[1] = 's';
-              send[2] = '\r';
-              send[3] = '\n';
-              UDR = 'Y';
+              if(next_step == show_name) {
+                send_len = 8;
+                send_p = 0;
+                send[0] = 'T';
+                send[1] = '+';
+                send[2] = 'N';
+                send[3] = 'A';
+                send[4] = 'M';
+                send[5] = 'E';
+                send[6] = '\r';
+                send[7] = '\n';
+                UDR = 'A';
+              }
             }
             break;
         }
         received_p = 0;
+        for( uint8_t i = 0; i < received_max; i++ ) {
+          received[i] = 0;
+        }
         received_parse = false;
       }
     }
